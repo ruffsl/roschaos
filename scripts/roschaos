@@ -1,0 +1,4 @@
+#!/usr/bin/env python
+
+import roschaos
+roschaos.roschaosmain()
