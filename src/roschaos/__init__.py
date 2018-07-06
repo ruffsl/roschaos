@@ -253,25 +253,72 @@ def _roschaos_cmd_param(argv, parser):
     @param argv: command-line args
     @type  argv: [str]
     """
-    args = argv[2:]
-    parser = ArgumentParser(prog=NAME)
-    subparsers = parser.add_subparsers(help='Param Subcommands')
-    server_parser = subparsers.add_parser(
-        'server', help='Modify Server Registration')
-    server_parser.add_argument(
-        '--scramble',
-        action='store_true',
-        help='Scramble all param registration')
-    server_parser.add_argument(
-        '--unlist',
-        action='store_true',
-        help='Unlist all param registration')
-    options, args = parser.parse_known_args(args)
 
-    if options.scramble:
-        _roschaos_master_param_scramble()
-    if options.unlist:
-        _roschaos_master_param_unlist()
+    subparsers = parser.add_subparsers(help='param subcommands', dest='param')
+    server_parser = subparsers.add_parser(
+        'server', help='server API')
+    subsubparsers = server_parser.add_subparsers(
+        help='server subcommands',
+        dest='server')
+
+    server_unsubscribe_parser = subsubparsers.add_parser(
+        'unsubscribe', help='unsubscribe from param updates')
+    server_unsubscribe_parser.add_argument(
+        '--node_name',
+        action='store',
+        help='node name expression')
+    server_unsubscribe_parser.add_argument(
+        '--node_uri',
+        action='store',
+        help='node uri expression')
+    server_unsubscribe_parser.add_argument(
+        '--param_key',
+        action='store',
+        required=True,
+        help='param key expression')
+    options, _ = parser.parse_known_args(argv)
+
+    if options.param == 'server':
+        if options.server == 'unsubscribe':
+            if options.node_name or options.node_uri:
+                _param_server_unsubscribe(
+                    options.node_name,
+                    options.node_uri,
+                    options.param_key)
+            else:
+                parser.error('Either --node_name or --node_uri is required')
+
+
+def _param_server_unsubscribe(node_name_str, node_uri_str, param_key_str):
+    node_name_pat = re.compile(node_name_str) if node_name_str else None
+    node_uri_pat = re.compile(node_uri_str) if node_uri_str else None
+    param_key_pat = re.compile(param_key_str) if param_key_str else None
+
+    master = rosgraph.Master(ID)
+    param_keys = master.getParamNames()
+    param_keys.sort()
+    blacklisted_param_keys = []
+    for param_key in param_keys:
+        if param_key_pat.match(param_key):
+            blacklisted_param_keys.append(param_key)
+
+    nodes = rosnode.get_node_names(namespace=None)
+    for node_name in nodes:
+        if node_name_pat:
+            if not node_name_pat.match(node_name):
+                continue
+        node_uri = rosnode.get_api_uri(master, node_name)
+        if node_uri_pat:
+            if not node_uri_pat.match(node_uri):
+                continue
+        master_n = rosgraph.Master(node_name)
+        for blacklisted_param_key in blacklisted_param_keys:
+            code = master_n.unsubscribeParam(node_uri, blacklisted_param_key)
+            # API docs clame: If numUnsubscribed is zero it means that
+            # the caller was not subscribed to the parameter.
+            # In practace: this is not true, as 1 is always retruned no mater what
+            # if code != 0:
+            #     print("Unsubscribed {} {}".format(blacklisted_param_key, node_name))
 
 
 def roschaosmain(argv=None):
