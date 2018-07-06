@@ -96,11 +96,11 @@ def _roschaos_cmd_master(argv, parser):
     unregister_topic_parser.add_argument(
         '--subscribers',
         action='store_true',
-        help='subscribers only')
+        help='filter subscribers')
     unregister_topic_parser.add_argument(
         '--publishers',
         action='store_true',
-        help='publishers only')
+        help='filter publishers')
     options, _ = parser.parse_known_args(argv)
 
     if options.master == 'unregister':
@@ -114,7 +114,13 @@ def _roschaos_cmd_master(argv, parser):
         elif options.unregister == 'service':
             _master_unregister_services(options.name)
         elif options.unregister == 'topic':
-            _roschaos_master_unregister_topic(options)
+            if not (options.publishers or options.subscribers):
+                parser.error('No --publisher or --subscriber filter provided')
+            _master_unregister_topics(
+                options.name,
+                options.type,
+                options.publishers,
+                options.subscribers)
 
 
 def _master_unregister_all_nodes():
@@ -157,6 +163,49 @@ def _master_unregister_services(name_str):
             master_n = rosgraph.Master(node_name)
             master_n.unregisterService(service_name, service_api)
             print("Unregistering {} {}".format(service_name, node_name))
+
+
+def _master_unregister_topics(name_str, type_str, filter_publishers, filter_subscribers):
+    name_pat = re.compile(name_str) if name_str else None
+    type_pat = re.compile(type_str) if type_str else None
+
+    master = rosgraph.Master(ID)
+    publishers, subscribers, _ = master.getSystemState()
+    topic_types = master.getTopicTypes()
+    if filter_publishers:
+        for topic_name, nodes in publishers:
+            if name_pat:
+                if not name_pat.match(topic_name):
+                    continue
+            if type_pat:
+                if not _check_types(topic_name, topic_types, type_pat):
+                    continue
+            for node_name in nodes:
+                node_api = master.lookupNode(node_name)
+                master_n = rosgraph.Master(node_name)
+                print("Unregistering publisher {} {}".format(topic_name, node_name))
+                master_n.unregisterPublisher(topic_name, node_api)
+    if filter_subscribers:
+        for topic_name, nodes in subscribers:
+            if name_pat:
+                if not name_pat.match(topic_name):
+                    continue
+            if type_pat:
+                if not _check_types(topic_name, topic_types, type_pat):
+                    continue
+            for node_name in nodes:
+                node_api = master.lookupNode(node_name)
+                master_n = rosgraph.Master(node_name)
+                print("Unregistering subscriber {} {}".format(topic_name, node_name))
+                master_n.unregisterSubscriber(topic_name, node_api)
+
+
+def _check_types(topic_name, topic_types, type_pat):
+    is_match = False
+    for _topic_name, _topic_type in topic_types:
+        if topic_name == _topic_name:
+            is_match = is_match or bool(type_pat.match(_topic_type))
+    return is_match
 
 
 def _roschaos_node_master_backtrace(node_api):
