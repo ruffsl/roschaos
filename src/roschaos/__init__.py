@@ -208,7 +208,7 @@ def _check_types(topic_name, topic_types, type_pat):
     return is_match
 
 
-def _roschaos_node_master_backtrace(node_api):
+def _slave_backtrace_master(node_api):
     """Not all ROS client libraries implemnt getMasterUri
     e.g. rospy but not roscpp"""
     socket.setdefaulttimeout(TIMEOUT)
@@ -218,24 +218,33 @@ def _roschaos_node_master_backtrace(node_api):
     os.environ['ROS_MASTER_URI'] = master_uri
 
 
-def _roschaos_cmd_node(argv):
+def _roschaos_cmd_slave(argv, parser):
     """
     Implements roschaos 'node' command.
     @param argv: command-line args
     @type  argv: [str]
     """
-    args = argv[2:]
-    parser = ArgumentParser(prog=NAME)
-    subparsers = parser.add_subparsers(help='Node Subcommands')
-    server_parser = subparsers.add_parser(
-        'master', help='Interact with Node Slave API')
-    server_parser.add_argument(
-        '--backtrace',
-        help='Backtrace Master URI remotly')
-    options, args = parser.parse_known_args(args)
 
-    if options.backtrace:
-        _roschaos_node_master_backtrace(options.backtrace)
+    subparsers = parser.add_subparsers(help='slave subcommands', dest='slave')
+    backtrace_parser = subparsers.add_parser(
+        'backtrace', help='backtrace info from slave API')
+    subsubparsers = backtrace_parser.add_subparsers(
+        help='backtrace subcommands',
+        dest='backtrace')
+
+    backtrace_master_parser = subsubparsers.add_parser(
+        'master', help='backtrace info about master')
+    backtrace_master_parser.add_argument(
+        '--uri',
+        help='backtrace Master URI remotly')
+    options, _ = parser.parse_known_args(argv)
+
+    if options.slave == 'backtrace':
+        if options.backtrace == 'master':
+            if options.uri:
+                _slave_backtrace_master(options.uri)
+            else:
+                parser.error('No action requested')
 
 
 def _roschaos_cmd_param(argv, parser):
