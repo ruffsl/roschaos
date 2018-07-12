@@ -24,6 +24,8 @@ except ImportError:
 
 import rosgraph
 import rosnode
+import rospy
+import rosservice
 import rostopic
 
 from rospy.core import xmlrpcapi
@@ -208,16 +210,6 @@ def _check_types(topic_name, topic_types, type_pat):
     return is_match
 
 
-def _slave_backtrace_master(node_api):
-    """Not all ROS client libraries implemnt getMasterUri
-    e.g. rospy but not roscpp"""
-    socket.setdefaulttimeout(TIMEOUT)
-    node = ServerProxy(node_api)
-    master_uri = rosnode._succeed(node.getMasterUri(ID))
-    print('ROS_MASTER_URI=', master_uri)
-    os.environ['ROS_MASTER_URI'] = master_uri
-
-
 def _roschaos_cmd_slave(argv, parser):
     """
     Implements roschaos 'node' command.
@@ -237,6 +229,33 @@ def _roschaos_cmd_slave(argv, parser):
     backtrace_master_parser.add_argument(
         '--uri',
         help='backtrace Master URI remotly')
+
+    service_parser = subparsers.add_parser(
+        'service', help='Remove Registration')
+    subsubparsers = service_parser.add_subparsers(
+        help='service subcommands',
+        dest='service')
+
+    service_logger_parser = subsubparsers.add_parser(
+        'logger', help='set logger levels')
+    service_logger_parser.add_argument(
+        '--node_name',
+        action='store',
+        help='node name expression')
+    service_logger_parser.add_argument(
+        '--node_uri',
+        action='store',
+        help='node uri expression')
+    service_logger_parser.add_argument(
+        '--logger_name',
+        action='store',
+        required=True,
+        help='logger name expression')
+    service_logger_parser.add_argument(
+        '--logger_level',
+        action='store',
+        required=True,
+        help='logger level to set to')
     options, _ = parser.parse_known_args(argv)
 
     if options.slave == 'backtrace':
@@ -245,6 +264,76 @@ def _roschaos_cmd_slave(argv, parser):
                 _slave_backtrace_master(options.uri)
             else:
                 parser.error('No action requested')
+    elif options.slave == 'service':
+        if options.service == 'logger':
+            if options.node_name or options.node_uri:
+                _slave_service_logger(
+                    options.node_name,
+                    options.node_uri,
+                    options.logger_name,
+                    options.logger_level)
+            else:
+                parser.error('Either --node_name or --node_uri is required')
+
+def _slave_backtrace_master(node_api):
+    """Not all ROS client libraries implemnt getMasterUri
+    e.g. rospy but not roscpp"""
+    socket.setdefaulttimeout(TIMEOUT)
+    node = ServerProxy(node_api)
+    master_uri = rosnode._succeed(node.getMasterUri(ID))
+    print('ROS_MASTER_URI=', master_uri)
+    os.environ['ROS_MASTER_URI'] = master_uri
+
+
+def _slave_service_logger(node_name_str, node_uri_str, logger_name_str, logger_level):
+    node_name_pat = re.compile(node_name_str) if node_name_str else None
+    node_uri_pat = re.compile(node_uri_str) if node_uri_str else None
+    logger_name_pat = re.compile(logger_name_str) if logger_name_str else None
+
+    logger_level_nodes = []
+    master = rosgraph.Master(ID)
+    nodes = rosnode.get_node_names(namespace=None)
+    for node_name in nodes:
+        if node_name_pat:
+            if not node_name_pat.match(node_name):
+                continue
+        node_uri = rosnode.get_api_uri(master, node_name)
+        if node_uri_pat:
+            if not node_uri_pat.match(node_uri):
+                continue
+        for service in rosservice.get_service_list(node_name):
+            if service == node_name + '/set_logger_level':
+                logger_level_nodes.append(node_name)
+    print(logger_level_nodes)
+
+    for logger_level_node in logger_level_nodes:
+        current_levels = _refresh_loggers(logger_level_node)
+        servicename = logger_level_node + '/set_logger_level'
+        service = rosservice.get_service_class_by_name(servicename)
+        request = service._request_class()
+        for current_logger, current_level in current_levels.items():
+            if logger_name_pat:
+                if not logger_name_pat.match(current_logger):
+                    continue
+            setattr(request, 'logger', current_logger)
+            setattr(request, 'level', logger_level)
+            proxy = rospy.ServiceProxy(str(servicename), service)
+            print("Setting logger {} {} {}".format(node_name, current_logger, logger_level))
+            proxy(request)
+
+
+def _refresh_loggers(node):
+    current_loggers = []
+    current_levels = {}
+    servicename = node + '/get_loggers'
+    service = rosservice.get_service_class_by_name(servicename)
+    request = service._request_class()
+    proxy = rospy.ServiceProxy(str(servicename), service)
+    response = proxy(request)
+    for logger in getattr(response, response.__slots__[0]):
+        current_loggers.append(getattr(logger, 'name'))
+        current_levels[getattr(logger, 'name')] = getattr(logger, 'level')
+    return current_levels
 
 
 def _roschaos_cmd_param(argv, parser):
