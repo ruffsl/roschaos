@@ -256,6 +256,23 @@ def _roschaos_cmd_slave(argv, parser):
         action='store',
         required=True,
         help='logger level to set to')
+
+    shutdown_parser = subparsers.add_parser(
+        'shutdown', help='Stop proccess')
+    subsubparsers = shutdown_parser.add_subparsers(
+        help='shutdown subcommands',
+        dest='shutdown')
+
+    shutdown_node_parser = subsubparsers.add_parser(
+        'node', help='shutdown nodes')
+    shutdown_node_parser.add_argument(
+        '--node_name',
+        action='store',
+        help='node name expression')
+    shutdown_node_parser.add_argument(
+        '--node_uri',
+        action='store',
+        help='node uri expression')
     options, _ = parser.parse_known_args(argv)
 
     if options.slave == 'backtrace':
@@ -274,6 +291,14 @@ def _roschaos_cmd_slave(argv, parser):
                     options.logger_level)
             else:
                 parser.error('Either --node_name or --node_uri is required')
+    elif options.slave == 'shutdown':
+        if options.shutdown == 'node':
+            if options.node_name or options.node_uri:
+                _slave_shutdown_nodes(
+                    options.node_name,
+                    options.node_uri)
+            else:
+                parser.error('Either --node_name or --node_uri is required')
 
 
 def _slave_backtrace_master(node_api):
@@ -284,6 +309,25 @@ def _slave_backtrace_master(node_api):
     master_uri = rosnode._succeed(node.getMasterUri(ID))
     print('ROS_MASTER_URI=', master_uri)
     os.environ['ROS_MASTER_URI'] = master_uri
+
+
+def _slave_shutdown_nodes(node_name_str, node_uri_str):
+    node_name_pat = re.compile(node_name_str) if node_name_str else None
+    node_uri_pat = re.compile(node_uri_str) if node_uri_str else None
+
+    master = rosgraph.Master(ID)
+    nodes = rosnode.get_node_names(namespace=None)
+    for node_name in nodes:
+        if node_name_pat:
+            if not node_name_pat.match(node_name):
+                continue
+        node_uri = rosnode.get_api_uri(master, node_name)
+        if node_uri_pat:
+            if not node_uri_pat.match(node_uri):
+                continue
+        print("Shutting down node {}".format(node_name))
+        p = ServerProxy(node_uri)
+        rosnode._succeed(p.shutdown(ID, ''))
 
 
 def _slave_service_logger(node_name_str, node_uri_str, logger_name_str, logger_level):
