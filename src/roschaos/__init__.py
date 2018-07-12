@@ -275,6 +275,7 @@ def _roschaos_cmd_slave(argv, parser):
             else:
                 parser.error('Either --node_name or --node_uri is required')
 
+
 def _slave_backtrace_master(node_api):
     """Not all ROS client libraries implemnt getMasterUri
     e.g. rospy but not roscpp"""
